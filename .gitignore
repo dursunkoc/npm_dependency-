@@ -1,0 +1,5 @@
+__pycache__/
+*.edgelist
+*.nodelist
+sample.html
+.vscode/settings.json
