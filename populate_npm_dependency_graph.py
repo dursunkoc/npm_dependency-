@@ -17,7 +17,19 @@ NPM_REGISTRY_PAGE_URL = 'https://www.npmjs.com/browse/depended'
 NPM_PACKAGE_PAGE_URL = 'https://www.npmjs.com/package/'
 OFFSET_PARAM = '?offset='
 PACKAGES_XPATH = '//section/div[@class="w-80"]/div/a/h3/text()'
-DEPS_XPATH = '//section[@id="dependencies"]/ul/li/a/text()'
+DEPS_XPATH = '(//section[@id="dependencies"]/ul)[1]/li/a/text()'
+
+visit_counter = 0
+
+def reset_visit_counter():
+    global visit_counter
+    visit_counter = 0
+    return visit_counter
+
+def increment_visit_counter():
+    global visit_counter
+    visit_counter = visit_counter + 1
+    return visit_counter
 
 def npm_registry_url(offset_value):
     if offset_value is None:
@@ -28,17 +40,19 @@ def npm_registry_url(offset_value):
 def npm_package_url(package_name):
     return f'{NPM_PACKAGE_PAGE_URL}{package_name}?activeTab=dependencies'
 
-def visit(url):
-    print(f'access: {url}')
+def visit(url, total):
+    counter = increment_visit_counter()
+    print(f'{counter}/{total} - access: {url}')
     return requests.get(url, verify=False)
 
 def fetch_registry(offset):
-    response = visit(npm_registry_url(offset))
+    response = visit(npm_registry_url(offset), 1)
     registry_content = response.content
     registry_html = html.fromstring(registry_content)
     return registry_html.xpath(PACKAGES_XPATH)
 
 def listPackages(number_of_packs):
+    reset_visit_counter()
     packages = []
     next_offset = 0
     while(next_offset < number_of_packs):
@@ -49,15 +63,24 @@ def listPackages(number_of_packs):
                 break
     return packages
 
-def find_deps(packages):
-    package_contents = {package: visit(npm_package_url(package)).text for package in packages}
+def find_deps(packages, depth, level):
+    reset_visit_counter()
+    total_packages = len(packages)
+    print(f"{depth} with {level} will visit {total_packages} packages")
+    package_contents = {package: visit(npm_package_url(package), total_packages).text for package in packages}
     package_htmls = {package: html.fromstring(package_content) for package, package_content in package_contents.items()}
-    return {package: package_html.xpath(DEPS_XPATH) for package, package_html in package_htmls.items()}
+    package_deps = {package: package_html.xpath(DEPS_XPATH) for package, package_html in package_htmls.items()}
+    if depth > level:
+        keys = set(package_deps.keys())
+        deps_packages = set([dep for deps in package_deps.values() for dep in deps])
+        deps_only = deps_packages - keys
+        deps_deps = find_deps(deps_only, depth, level+1)
+        package_deps.update(deps_deps)
+    return package_deps
 
 def generate_grid_edgelist(size, depth):
-    #TODO use depth for recursive dependencies
     packages = listPackages(size)
-    package_deps = find_deps(packages)
+    package_deps = find_deps(packages, depth, 0)
     G = nx.DiGraph()
     for package, dependencies in package_deps.items():
         G.add_node(package, type= 'PACKAGE')
@@ -98,4 +121,4 @@ if __name__ == '__main__':
     parser.add_option("-d","--depth", dest="depth", type=int,
                       help="Max depth of dependencies")
     options, args = parser.parse_args()
-    main(options)
+    main(int(options.size), int(options.depth))
